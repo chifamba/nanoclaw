@@ -18,26 +18,50 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
  * Address the credential proxy binds to.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
- *   falling back to 0.0.0.0 if the interface isn't found.
+ *   falling back to 127.0.0.1 if the interface isn't found.
+ *   Set CREDENTIAL_PROXY_HOST to override (e.g. a custom bridge IP).
  */
 export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+  process.env.CREDENTIAL_PROXY_HOST || _detectProxyBindHost();
 
-function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+/** Exported for testing only. Accepts optional injectable dependencies. */
+export function _detectProxyBindHost(
+  env: {
+    platform?: () => NodeJS.Platform;
+    networkInterfaces?: () => ReturnType<typeof os.networkInterfaces>;
+    fileExists?: (path: string) => boolean;
+  } = {},
+): string {
+  const getPlatform = env.platform ?? (() => os.platform());
+  const getIfaces = env.networkInterfaces ?? (() => os.networkInterfaces());
+  const fileExists =
+    env.fileExists ?? ((p: string) => fs.existsSync(p));
+
+  if (getPlatform() === 'darwin') return '127.0.0.1';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
-  if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
+  if (fileExists('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
-  // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
-  const ifaces = os.networkInterfaces();
+  // Bare-metal Linux: bind to the docker0 bridge IP so only Docker containers
+  // can reach the credential proxy. Never fall back to 0.0.0.0 — that would
+  // expose the proxy (and real API credentials) to every interface on the host,
+  // including the LAN. If docker0 isn't found, bind to loopback; containers
+  // that cannot reach the proxy will get a connection error rather than
+  // silently working with an insecure binding. Set CREDENTIAL_PROXY_HOST to
+  // the correct bridge IP to restore connectivity in that case.
+  const ifaces = getIfaces();
   const docker0 = ifaces['docker0'];
   if (docker0) {
     const ipv4 = docker0.find((a) => a.family === 'IPv4');
     if (ipv4) return ipv4.address;
   }
-  return '0.0.0.0';
+  logger.warn(
+    'docker0 interface not found; credential proxy will bind to 127.0.0.1. ' +
+      'If containers cannot reach the Anthropic API, set CREDENTIAL_PROXY_HOST ' +
+      'to the correct Docker bridge IP (e.g. 172.17.0.1).',
+  );
+  return '127.0.0.1';
 }
 
 /** CLI args needed for the container to resolve the host gateway. */
