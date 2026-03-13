@@ -34,8 +34,7 @@ export function _detectProxyBindHost(
 ): string {
   const getPlatform = env.platform ?? (() => os.platform());
   const getIfaces = env.networkInterfaces ?? (() => os.networkInterfaces());
-  const fileExists =
-    env.fileExists ?? ((p: string) => fs.existsSync(p));
+  const fileExists = env.fileExists ?? ((p: string) => fs.existsSync(p));
 
   if (getPlatform() === 'darwin') return '127.0.0.1';
 
