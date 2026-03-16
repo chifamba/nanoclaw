@@ -392,6 +392,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: 'claude-3-5-sonnet-20241022',
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -450,12 +451,26 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      
+      // Filter out tool calls/results if they are JSON objects (we only want to stream text to the user)
+      let isJson = false;
+      if (textResult) {
+        try {
+          const parsed = JSON.parse(textResult);
+          if (typeof parsed === 'object' && parsed !== null) isJson = true;
+        } catch { }
+      }
+
+      if (textResult && !isJson) {
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+      } else {
+        log(`Result #${resultCount}: subtype=${message.subtype} (skipping JSON/empty result)`);
+      }
     }
   }
 
