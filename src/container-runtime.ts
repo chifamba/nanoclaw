@@ -30,10 +30,7 @@ export function readonlyMountArgs(
   hostPath: string,
   containerPath: string,
 ): string[] {
-  return [
-    '--mount',
-    `type=bind,source=${hostPath},target=${containerPath},readonly`,
-  ];
+  return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
 /** Returns the shell command to stop a container by name. */

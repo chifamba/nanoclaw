@@ -65,6 +65,11 @@ function buildVolumeMounts(
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
 
+  logger.debug(
+    { group: group.name, isMain, runtime: CONTAINER_RUNTIME_BIN },
+    'Building volume mounts',
+  );
+
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
     // (group folder, IPC, .claude/) are mounted separately below.
@@ -81,16 +86,19 @@ function buildVolumeMounts(
     // Credentials are injected by the credential proxy, never exposed to containers.
     // Apple Container handles this via mount --bind in the entrypoint.
     // virtiofs doesn't support mounting /dev/null as a file, so we use an empty file.
-    const emptyEnvPath = path.join(DATA_DIR, 'empty-env');
-    if (!fs.existsSync(emptyEnvPath)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(emptyEnvPath, '');
+    // Skip on macOS/Apple Container to avoid "A file with the same name already exists" conflict.
+    if (CONTAINER_RUNTIME_BIN !== 'container') {
+      const emptyEnvPath = path.join(DATA_DIR, 'empty-env');
+      if (!fs.existsSync(emptyEnvPath)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(emptyEnvPath, '');
+      }
+      mounts.push({
+        hostPath: emptyEnvPath,
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
     }
-    mounts.push({
-      hostPath: emptyEnvPath,
-      containerPath: '/workspace/project/.env',
-      readonly: true,
-    });
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -230,7 +238,7 @@ function buildContainerArgs(
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
-    `ANTHROPIC_BASE_URL=http://host.docker.internal:${CREDENTIAL_PROXY_PORT}`,
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
 
   // Mirror the host's auth method with a placeholder value.
@@ -248,7 +256,13 @@ function buildContainerArgs(
   args.push(...hostGatewayArgs());
 
   // Pass Gemini API key if present for the Gemini MCP server
-  const envVars = readEnvFile(['GOOGLE_AI_API_KEY', 'GOOGLE_AI_MODEL']);
+  const envVars = readEnvFile([
+    'GOOGLE_AI_API_KEY',
+    'GOOGLE_AI_MODEL',
+    'OBSIDIAN_API_KEY',
+    'OBSIDIAN_PORT',
+    'OBSIDIAN_HOST',
+  ]);
   const geminiKey = process.env.GOOGLE_AI_API_KEY || envVars.GOOGLE_AI_API_KEY;
   if (geminiKey) {
     args.push('-e', `GOOGLE_AI_API_KEY=${geminiKey}`);
@@ -257,6 +271,16 @@ function buildContainerArgs(
   if (geminiModel) {
     args.push('-e', `GOOGLE_AI_MODEL=${geminiModel}`);
   }
+
+  // Pass Obsidian configuration for research skills
+  const obsidianKey = process.env.OBSIDIAN_API_KEY || envVars.OBSIDIAN_API_KEY;
+  if (obsidianKey) {
+    args.push('-e', `OBSIDIAN_API_KEY=${obsidianKey}`);
+  }
+  const obsidianPort = process.env.OBSIDIAN_PORT || envVars.OBSIDIAN_PORT || '27124';
+  args.push('-e', `OBSIDIAN_PORT=${obsidianPort}`);
+  const obsidianHost = process.env.OBSIDIAN_HOST || envVars.OBSIDIAN_HOST || CONTAINER_HOST_GATEWAY;
+  args.push('-e', `OBSIDIAN_HOST=${obsidianHost}`);
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
