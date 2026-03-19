@@ -277,9 +277,13 @@ function buildContainerArgs(
   if (obsidianKey) {
     args.push('-e', `OBSIDIAN_API_KEY=${obsidianKey}`);
   }
-  const obsidianPort = process.env.OBSIDIAN_PORT || envVars.OBSIDIAN_PORT || '27124';
+  const obsidianPort =
+    process.env.OBSIDIAN_PORT || envVars.OBSIDIAN_PORT || '27124';
   args.push('-e', `OBSIDIAN_PORT=${obsidianPort}`);
-  const obsidianHost = process.env.OBSIDIAN_HOST || envVars.OBSIDIAN_HOST || CONTAINER_HOST_GATEWAY;
+  const obsidianHost =
+    process.env.OBSIDIAN_HOST ||
+    envVars.OBSIDIAN_HOST ||
+    CONTAINER_HOST_GATEWAY;
   args.push('-e', `OBSIDIAN_HOST=${obsidianHost}`);
 
   // Run as host user so bind-mounted files are accessible.
