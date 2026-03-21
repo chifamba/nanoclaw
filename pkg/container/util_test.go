@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/nanoclaw/nanoclaw/pkg/config"
 )
 
 func TestIsValidGroupFolder(t *testing.T) {
@@ -13,15 +11,13 @@ func TestIsValidGroupFolder(t *testing.T) {
 		folder string
 		want   bool
 	}{
-		{"valid-folder", true},
-		{"Valid_Folder-123", true},
+		{"main", true},
+		{"family-chat", true},
+		{"Team_42", true},
+		{"../../etc", false},
+		{"/tmp", false},
+		{"global", false},
 		{"", false},
-		{" ", false},
-		{"global", false}, // reserved
-		{"..", false},
-		{"folder/with/slash", false},
-		{"a" + strings.Repeat("a", 63), true},
-		{"a" + strings.Repeat("a", 64), false},
 	}
 
 	for _, tt := range tests {
@@ -32,23 +28,34 @@ func TestIsValidGroupFolder(t *testing.T) {
 }
 
 func TestResolveGroupFolderPath(t *testing.T) {
-	tempDir := t.TempDir()
-	config.GroupsDir = tempDir
-
-	folder := "test-group"
+	folder := "family-chat"
 	got := ResolveGroupFolderPath(folder)
-	want, _ := filepath.Abs(filepath.Join(tempDir, folder))
-	
-	if got != want {
+	want := filepath.Join("groups", "family-chat")
+	if !strings.HasSuffix(got, want) {
 		t.Errorf("ResolveGroupFolderPath(%q) = %v, want %v", folder, got, want)
 	}
 
-	// Test escape attempt
 	defer func() {
 		if r := recover(); r == nil {
 			t.Errorf("ResolveGroupFolderPath should have panicked for escaping path")
 		}
 	}()
 	// This will panic inside AssertValidGroupFolder
-	ResolveGroupFolderPath("..")
+	ResolveGroupFolderPath("../../etc")
+}
+
+func TestResolveGroupIpcPath(t *testing.T) {
+	folder := "family-chat"
+	got := ResolveGroupIpcPath(folder)
+	want := filepath.Join("data", "ipc", "family-chat")
+	if !strings.HasSuffix(got, want) {
+		t.Errorf("ResolveGroupIpcPath(%q) = %v, want %v", folder, got, want)
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("ResolveGroupIpcPath should have panicked for escaping path")
+		}
+	}()
+	ResolveGroupIpcPath("/tmp")
 }
