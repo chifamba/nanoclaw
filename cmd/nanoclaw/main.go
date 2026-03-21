@@ -155,10 +155,22 @@ func main() {
 
 	// 3. Initialize DB
 	dbPath := filepath.Join(config.StoreDir, "messages.db")
-	storage, err := db.NewSQLiteStorage(dbPath)
+	var storage db.Storage
+	sqliteStorage, err := db.NewSQLiteStorage(dbPath)
 	if err != nil {
 		logger.Error("Failed to initialize database", "err", err)
 		os.Exit(1)
+	}
+	storage = sqliteStorage
+
+	if config.RedisURL != "" {
+		cachedStorage, err := db.NewCachedStorage(sqliteStorage, config.RedisURL)
+		if err != nil {
+			logger.Warn("Failed to initialize Redis cache, falling back to SQLite only", "err", err)
+		} else {
+			logger.Info("Redis cache initialized")
+			storage = cachedStorage
+		}
 	}
 	defer storage.Close()
 
@@ -170,10 +182,15 @@ func main() {
 		queue:   queue,
 	}
 
+	// Message Poller initialization (moved up to wire with OnMessage)
+	// We pass an empty channels slice for now, and will update it after they are connected
+	poller := messagepoller.NewMessagePoller(storage, queue, nil, app)
+
 	// 5. Setup channels
 	opts := channel.ChannelOpts{
 		OnMessage: func(chatJID string, msg types.NewMessage) {
 			storage.StoreMessage(msg)
+			poller.Trigger()
 		},
 		OnChatMetadata: func(chatJID string, timestamp string, name string, channel string, isGroup bool) {
 			storage.StoreChatMetadata(chatJID, timestamp, &name, &channel, &isGroup)
@@ -209,8 +226,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Message Poller & Worker wiring
-	poller := messagepoller.NewMessagePoller(storage, queue, app.channels, app)
+	// Update poller with actual channels and wire queue
+	poller.Channels = app.channels
 	queue.SetProcessMessagesFn(poller.ProcessGroupMessages)
 	go poller.Start(ctx)
 
