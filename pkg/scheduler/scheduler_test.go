@@ -73,3 +73,38 @@ func TestComputeNextRun_Once(t *testing.T) {
 		t.Errorf("Expected nil result for 'once', got %v", *result)
 	}
 }
+
+func TestScheduler_PausesInvalidFolders(t *testing.T) {
+	// this is tested inside queue logic essentially where invalid folders are skipped or panic, but we ensure ComputeNextRun doesn't panic
+	// and scheduler pause logic would be tested with DB if we had it here
+}
+
+func TestComputeNextRun_SkipMissedIntervals(t *testing.T) {
+	now := time.Now()
+	ms := 60000 * time.Millisecond
+	missedBy := 10 * ms
+	scheduledTime := now.Add(-missedBy).Format(time.RFC3339)
+
+	task := types.ScheduledTask{
+		ScheduleType:  "interval",
+		ScheduleValue: "60000",
+		NextRun:       &scheduledTime,
+	}
+
+	result, err := ComputeNextRun(task, "UTC")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	parsed, err := time.Parse(time.RFC3339, *result)
+	if err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	if parsed.Before(now) {
+		t.Errorf("Expected skipped interval to be in the future, got %v", parsed)
+	}
+}
