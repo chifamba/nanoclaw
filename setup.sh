@@ -59,6 +59,29 @@ check_node() {
   fi
 }
 
+# --- Go check ---
+
+check_go() {
+  GO_OK="false"
+  GO_VERSION="not_found"
+  GO_PATH_FOUND=""
+
+  if command -v go >/dev/null 2>&1; then
+    GO_VERSION=$(go version | awk '{print $3}' | sed 's/^go//')
+    GO_PATH_FOUND=$(command -v go)
+    local major minor
+    major=$(echo "$GO_VERSION" | cut -d. -f1)
+    minor=$(echo "$GO_VERSION" | cut -d. -f2)
+    # Check for 1.26+
+    if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 26 ]; }; then
+      GO_OK="true"
+    fi
+    log "Go $GO_VERSION at $GO_PATH_FOUND (ok=$GO_OK)"
+  else
+    log "Go not found"
+  fi
+}
+
 # --- npm install ---
 
 install_deps() {
@@ -120,8 +143,9 @@ check_build_tools() {
 
 log "=== Bootstrap started ==="
 
-detect_platform
+detect_platform()
 check_node
+check_go
 install_deps
 check_build_tools
 
@@ -129,6 +153,8 @@ check_build_tools
 STATUS="success"
 if [ "$NODE_OK" = "false" ]; then
   STATUS="node_missing"
+elif [ "$GO_OK" = "false" ]; then
+  STATUS="go_missing"
 elif [ "$DEPS_OK" = "false" ]; then
   STATUS="deps_failed"
 elif [ "$NATIVE_OK" = "false" ]; then
@@ -143,6 +169,9 @@ IS_ROOT: $IS_ROOT
 NODE_VERSION: $NODE_VERSION
 NODE_OK: $NODE_OK
 NODE_PATH: ${NODE_PATH_FOUND:-not_found}
+GO_VERSION: $GO_VERSION
+GO_OK: $GO_OK
+GO_PATH: ${GO_PATH_FOUND:-not_found}
 DEPS_OK: $DEPS_OK
 NATIVE_OK: $NATIVE_OK
 HAS_BUILD_TOOLS: $HAS_BUILD_TOOLS
@@ -153,7 +182,7 @@ EOF
 
 log "=== Bootstrap completed: $STATUS ==="
 
-if [ "$NODE_OK" = "false" ]; then
+if [ "$NODE_OK" = "false" ] || [ "$GO_OK" = "false" ]; then
   exit 2
 fi
 if [ "$DEPS_OK" = "false" ] || [ "$NATIVE_OK" = "false" ]; then

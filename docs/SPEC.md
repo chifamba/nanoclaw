@@ -26,7 +26,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        HOST (macOS / Linux)                           │
-│                     (Main Node.js Process)                            │
+│                     (Main Go Process)                                 │
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                       │
 │  ┌──────────────────┐                  ┌────────────────────┐        │
@@ -49,44 +49,25 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 ├──────────────────────────────────────────────────────────────────────┤
 │                     CONTAINER (Linux VM)                               │
 ├──────────────────────────────────────────────────────────────────────┤
-│  ┌──────────────────────────────────────────────────────────────┐    │
-│  │                    AGENT RUNNER                               │    │
-│  │                                                                │    │
-│  │  Working directory: /workspace/group (mounted from host)       │    │
-│  │  Volume mounts:                                                │    │
-│  │    • groups/{name}/ → /workspace/group                         │    │
-│  │    • groups/global/ → /workspace/global/ (non-main only)       │    │
-│  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │    │
-│  │    • Additional dirs → /workspace/extra/*                      │    │
-│  │                                                                │    │
-│  │  Tools (all groups):                                           │    │
-│  │    • Bash (safe - sandboxed in container!)                     │    │
-│  │    • Read, Write, Edit, Glob, Grep (file operations)           │    │
-│  │    • WebSearch, WebFetch (internet access)                     │    │
-│  │    • agent-browser (browser automation)                        │    │
-│  │    • mcp__nanoclaw__* (scheduler tools via IPC)                │    │
-│  │                                                                │    │
-│  └──────────────────────────────────────────────────────────────┘    │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
+...
 ```
 
 ### Technology Stack
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
-| Message Storage | SQLite (better-sqlite3) | Store messages for polling |
+| Channel System | Channel registry (`pkg/channel/registry.go`) | Channels self-register at startup |
+| Message Storage | SQLite (go-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
+| Agent | @anthropic-ai/claude-agent-sdk | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
-| Runtime | Node.js 20+ | Host process for routing and scheduling |
+| Runtime | Go 1.26+ | Host process for routing and scheduling |
 
 ---
 
 ## Architecture: Channel System
 
-The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a [Claude Code skill](https://code.claude.com/docs/en/skills) that adds the channel code to your fork. Channels self-register at startup; installed channels with missing credentials emit a WARN log and are skipped.
+The core ships with built-in channels (WhatsApp, Telegram, Slack, Discord, Gmail). Channels self-register at startup; channels with missing credentials emit a WARN log and are skipped.
 
 ### System Diagram
 
@@ -97,131 +78,82 @@ graph LR
         TG[Telegram]
         SL[Slack]
         DC[Discord]
-        New["Other Channel (Signal, Gmail...)"]
+        GM[Gmail]
     end
 
-    subgraph Orchestrator["Orchestrator — index.ts"]
-        ML[Message Loop]
+    subgraph Orchestrator["Orchestrator — main.go"]
+        ML[Message Poller]
         GQ[Group Queue]
         RT[Router]
-        TS[Task Scheduler]
+        TS[Scheduler]
         DB[(SQLite)]
     end
-
-    subgraph Execution["Container Execution"]
-        CR[Container Runner]
-        LC["Linux Container"]
-        IPC[IPC Watcher]
-    end
-
-    %% Flow
-    WA & TG & SL & DC & New -->|onMessage| ML
-    ML --> GQ
-    GQ -->|concurrency| CR
-    CR --> LC
-    LC -->|filesystem IPC| IPC
-    IPC -->|tasks & messages| RT
-    RT -->|Channel.sendMessage| Channels
-    TS -->|due tasks| CR
-
-    %% DB Connections
-    DB <--> ML
-    DB <--> TS
-
-    %% Styling for the dynamic channel
-    style New stroke-dasharray: 5 5,stroke-width:2px
+...
 ```
 
 ### Channel Registry
 
-The channel system is built on a factory registry in `src/channels/registry.ts`:
+The channel system is built on a factory registry in `pkg/channel/registry.go`:
 
-```typescript
-export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
+```go
+type ChannelFactory func(opts ChannelOpts) Channel
 
-const registry = new Map<string, ChannelFactory>();
-
-export function registerChannel(name: string, factory: ChannelFactory): void {
-  registry.set(name, factory);
-}
-
-export function getChannelFactory(name: string): ChannelFactory | undefined {
-  return registry.get(name);
-}
-
-export function getRegisteredChannelNames(): string[] {
-  return [...registry.keys()];
-}
+func RegisterChannel(name string, factory ChannelFactory)
+func GetChannelFactory(name string) ChannelFactory
+func GetRegisteredChannelNames() []string
 ```
 
-Each factory receives `ChannelOpts` (callbacks for `onMessage`, `onChatMetadata`, and `registeredGroups`) and returns either a `Channel` instance or `null` if that channel's credentials are not configured.
+Each factory receives `ChannelOpts` (callbacks for `OnMessage`, `OnChatMetadata`, and `RegisteredGroups`) and returns a `Channel` instance.
 
 ### Channel Interface
 
-Every channel implements this interface (defined in `src/types.ts`):
+Every channel implements this interface (defined in `pkg/channel/types.go`):
 
-```typescript
-interface Channel {
-  name: string;
-  connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
-  isConnected(): boolean;
-  ownsJid(jid: string): boolean;
-  disconnect(): Promise<void>;
-  setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  syncGroups?(force: boolean): Promise<void>;
+```go
+type Channel interface {
+	Name() string
+	Connect() error
+	SendMessage(jid string, text string) error
+	IsConnected() bool
+	OwnsJID(jid string) bool
+	Disconnect() error
 }
 ```
 
+Optional interfaces: `TypingChannel`, `SyncableChannel`.
+
 ### Self-Registration Pattern
 
-Channels self-register using a barrel-import pattern:
+Channels self-register using `init()` functions:
 
-1. Each channel skill adds a file to `src/channels/` (e.g. `whatsapp.ts`, `telegram.ts`) that calls `registerChannel()` at module load time:
+1. Each channel package (e.g. `pkg/channels/whatsapp`) calls `RegisterChannel()` in its `init()` function:
 
-   ```typescript
-   // src/channels/whatsapp.ts
-   import { registerChannel, ChannelOpts } from './registry.js';
-
-   export class WhatsAppChannel implements Channel { /* ... */ }
-
-   registerChannel('whatsapp', (opts: ChannelOpts) => {
-     // Return null if credentials are missing
-     if (!existsSync(authPath)) return null;
-     return new WhatsAppChannel(opts);
-   });
-   ```
-
-2. The barrel file `src/channels/index.ts` imports all channel modules, triggering registration:
-
-   ```typescript
-   import './whatsapp.js';
-   import './telegram.js';
-   // ... each skill adds its import here
-   ```
-
-3. At startup, the orchestrator (`src/index.ts`) loops through registered channels and connects whichever ones return a valid instance:
-
-   ```typescript
-   for (const name of getRegisteredChannelNames()) {
-     const factory = getChannelFactory(name);
-     const channel = factory?.(channelOpts);
-     if (channel) {
-       await channel.connect();
-       channels.push(channel);
-     }
+   ```go
+   // pkg/channels/whatsapp/whatsapp.go
+   func init() {
+       channel.RegisterChannel("whatsapp", NewWhatsAppChannel)
    }
+   ```
+
+2. The orchestrator (`cmd/nanoclaw/main.go`) imports all channel packages, triggering registration:
+
+   ```go
+   import (
+       _ "github.com/nanoclaw/nanoclaw/pkg/channels/whatsapp"
+       _ "github.com/nanoclaw/nanoclaw/pkg/channels/telegram"
+       // ...
+   )
    ```
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/channels/registry.ts` | Channel factory registry |
-| `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
-| `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
-| `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
-| `src/router.ts` | Finds the owning channel for a JID, formats messages |
+| `pkg/channel/registry.go` | Channel factory registry |
+| `pkg/channel/types.go` | `Channel` interface, `ChannelOpts`, message types |
+| `cmd/nanoclaw/main.go` | Orchestrator — instantiates channels, runs message loop |
+| `pkg/router/router.go` | Finds the owning channel for a JID |
+| `pkg/router/formatting.go` | Formats messages |
 
 ### Adding a New Channel
 
@@ -246,27 +178,37 @@ nanoclaw/
 │   ├── REQUIREMENTS.md            # Architecture decisions
 │   └── SECURITY.md                # Security model
 ├── README.md                      # User documentation
-├── package.json                   # Node.js dependencies
-├── tsconfig.json                  # TypeScript configuration
-├── .mcp.json                      # MCP server configuration (reference)
+├── Makefile                       # Go build/test/run tasks
+├── go.mod                         # Go module definition
+├── go.sum                         # Go dependency checksums
 ├── .gitignore
 │
-├── src/
-│   ├── index.ts                   # Orchestrator: state, message loop, agent invocation
-│   ├── channels/
-│   │   ├── registry.ts            # Channel factory registry
-│   │   └── index.ts               # Barrel imports for channel self-registration
-│   ├── ipc.ts                     # IPC watcher and task processing
-│   ├── router.ts                  # Message formatting and outbound routing
-│   ├── config.ts                  # Configuration constants
-│   ├── types.ts                   # TypeScript interfaces (includes Channel)
-│   ├── logger.ts                  # Pino logger setup
-│   ├── db.ts                      # SQLite database initialization and queries
-│   ├── group-queue.ts             # Per-group queue with global concurrency limit
-│   ├── mount-security.ts          # Mount allowlist validation for containers
-│   ├── whatsapp-auth.ts           # Standalone WhatsApp authentication
-│   ├── task-scheduler.ts          # Runs scheduled tasks when due
-│   └── container-runner.ts        # Spawns agents in containers
+├── cmd/
+│   ├── nanoclaw/
+│   │   └── main.go                # Orchestrator: entry point, wiring
+│   ├── setup/
+│   │   └── main.go                # Setup CLI entry point
+│   └── whatsapp-auth/
+│       └── main.go                # Standalone WhatsApp authentication
+│
+├── pkg/
+│   ├── channel/                   # Channel registry and base types
+│   ├── channels/                  # Messaging platform implementations
+│   ├── config/                    # Configuration and constants
+│   ├── container/                 # Container runner and mount logic
+│   ├── db/                        # SQLite storage layer
+│   ├── env/                       # .env file reading
+│   ├── ipc/                       # File-based IPC watcher
+│   ├── logger/                    # Structured logging
+│   ├── messagepoller/             # Message loop (polling SQLite)
+│   ├── mount/                     # Mount allowlist validation
+│   ├── proxy/                     # Credential proxy
+│   ├── router/                    # Routing and formatting
+│   ├── scheduler/                 # Task scheduler
+│   ├── senderallowlist/           # Message dropping logic
+│   ├── setup/                     # Setup step implementations
+│   ├── taskqueue/                 # Per-group message queue
+│   └── types/                     # Shared data structures
 │
 ├── container/
 │   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
@@ -280,8 +222,6 @@ nanoclaw/
 │   └── skills/
 │       └── agent-browser.md       # Browser automation skill
 │
-├── dist/                          # Compiled JavaScript (gitignored)
-│
 ├── .claude/
 │   └── skills/
 │       ├── setup/SKILL.md              # /setup - First-time installation
@@ -293,62 +233,30 @@ nanoclaw/
 │       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
 │       ├── convert-to-apple-container/  # /convert-to-apple-container - Apple Container runtime
 │       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
-│
-├── groups/
-│   ├── CLAUDE.md                  # Global memory (all groups read this)
-│   ├── {channel}_main/             # Main control channel (e.g., whatsapp_main/)
-│   │   ├── CLAUDE.md              # Main channel memory
-│   │   └── logs/                  # Task execution logs
-│   └── {channel}_{group-name}/    # Per-group folders (created on registration)
-│       ├── CLAUDE.md              # Group-specific memory
-│       ├── logs/                  # Task logs for this group
-│       └── *.md                   # Files created by the agent
-│
-├── store/                         # Local data (gitignored)
-│   ├── auth/                      # WhatsApp authentication state
-│   └── messages.db                # SQLite database (messages, chats, scheduled_tasks, task_run_logs, registered_groups, sessions, router_state)
-│
-├── data/                          # Application state (gitignored)
-│   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
-│
-├── logs/                          # Runtime logs (gitignored)
-│   ├── nanoclaw.log               # Host stdout
-│   └── nanoclaw.error.log         # Host stderr
-│   # Note: Per-container logs are in groups/{folder}/logs/container-*.log
-│
-└── launchd/
-    └── com.nanoclaw.plist         # macOS service configuration
+...
 ```
 
 ---
 
 ## Configuration
 
-Configuration constants are in `src/config.ts`:
+Configuration constants are in `pkg/config/config.go`:
 
-```typescript
-import path from 'path';
-
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
-export const POLL_INTERVAL = 2000;
-export const SCHEDULER_POLL_INTERVAL = 60000;
-
-// Paths are absolute (required for container mounts)
-const PROJECT_ROOT = process.cwd();
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-
-// Container configuration
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
-export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
-export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
-
-export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
+```go
+var (
+    AssistantName            = "Andy"
+    PollInterval             = 2000
+    SchedulerPollInterval    = 60000
+    StoreDir                 = ""
+    GroupsDir                = ""
+    DataDir                  = ""
+    ContainerImage           = "nanoclaw-agent:latest"
+    ContainerTimeout         = 1800000
+    IPCPollInterval          = 1000
+    IdleTimeout              = 1800000
+    MaxConcurrentContainers  = 5
+    TriggerPattern           *regexp.Regexp
+)
 ```
 
 **Note:** Paths must be absolute for container volume mounts to work correctly.
@@ -636,20 +544,20 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 
 ## Deployment
 
-NanoClaw runs as a single macOS launchd service.
+NanoClaw runs as a background service (launchd on macOS, systemd on Linux).
 
 ### Startup Sequence
 
 When NanoClaw starts, it:
-1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
-2. Initializes the SQLite database (migrates from JSON files if they exist)
-3. Loads state from SQLite (registered groups, sessions, router state)
-4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
-5. Once at least one channel is connected:
+1. **Ensures container runtime is running**
+2. Initializes the SQLite database
+3. Loads state from SQLite
+4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `Connect()` on each
+5. Once channels are ready:
    - Starts the scheduler loop
-   - Starts the IPC watcher for container messages
-   - Sets up the per-group queue with `processGroupMessages`
-   - Recovers any unprocessed messages from before shutdown
+   - Starts the IPC watcher
+   - Sets up the per-group queue
+   - Recovers any unprocessed messages
    - Starts the message polling loop
 
 ### Service: com.nanoclaw
@@ -664,11 +572,10 @@ When NanoClaw starts, it:
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{NODE_PATH}}</string>
-        <string>{{PROJECT_ROOT}}/dist/index.js</string>
+        <string>/Users/robert/projects/github.com/nanoclaw/bin/nanoclaw</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>{{PROJECT_ROOT}}</string>
+    <string>/Users/robert/projects/github.com/nanoclaw</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -779,7 +686,5 @@ chmod 700 groups/
 
 Run manually for verbose output:
 ```bash
-npm run dev
-# or
-node dist/index.js
+make run
 ```

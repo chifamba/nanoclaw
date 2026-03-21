@@ -5,7 +5,7 @@ description: Run initial NanoClaw setup. Use when user wants to install dependen
 
 # NanoClaw Setup
 
-Run setup steps automatically. Only pause when user action is required (channel authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
+Run setup steps automatically. Only pause when user action is required (channel authentication, configuration choices). Setup uses `make build` to ensure binaries are ready, then `bin/setup --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
@@ -50,21 +50,18 @@ Already configured. Continue.
 
 **Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
 
-## 1. Bootstrap (Node.js + Dependencies)
+## 1. Bootstrap (Go + Node.js + Dependencies)
 
-Run `bash setup.sh` and parse the status block.
+Run `make build` and verify Go 1.26+ is installed.
 
-- If NODE_OK=false → Node.js is missing or too old. Use `AskUserQuestion: Would you like me to install Node.js 22?` If confirmed:
-  - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
-  - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
-  - After installing Node, re-run `bash setup.sh`
-- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
-- If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
-- Record PLATFORM and IS_WSL for later steps.
+- If Go is missing: `AskUserQuestion: Go 1.26+ is required for the host process. Would you like me to install it?` (brew install go or asdf)
+- Run `bash setup.sh` and parse the status block for Node.js (required for agents in containers).
+- After ensuring runtimes, run `make build`.
+
 
 ## 2. Check Environment
 
-Run `npx tsx setup/index.ts --step environment` and parse the status block.
+Run `bin/setup --step environment` and parse the status block.
 
 - If HAS_AUTH=true → WhatsApp is already configured, note for step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
@@ -104,7 +101,7 @@ grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "
 
 ### 3c. Build and test
 
-Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse the status block.
+Run `bin/setup --step container -- --runtime <chosen>` and parse the status block.
 
 **If BUILD_OK=false:** Read `logs/setup.log` tail for the build error.
 - Cache issue (stale layers): `docker builder prune -f` (Docker) or `container builder stop && container builder rm && container builder start` (Apple Container). Retry.
@@ -146,10 +143,10 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+**After all channel skills complete**, ensure everything is built:
 
 ```bash
-npm install && npm run build
+make build
 ```
 
 If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
@@ -158,8 +155,8 @@ If the build fails, read the error output and fix it (usually a missing dependen
 
 AskUserQuestion: Agent access to external directories?
 
-**No:** `npx tsx setup/index.ts --step mounts -- --empty`
-**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
+**No:** `bin/setup --step mounts -- --empty`
+**Yes:** Collect paths/permissions. `bin/setup --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
 ## 7. Start Service
 
@@ -167,7 +164,7 @@ If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
 - Linux: `systemctl --user stop nanoclaw` (or `systemctl stop nanoclaw` if root)
 
-Run `npx tsx setup/index.ts --step service` and parse the status block.
+Run `bin/setup --step service` and parse the status block.
 
 **If FALLBACK=wsl_no_systemd:** WSL without systemd detected. Tell user they can either enable systemd in WSL (`echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf` then restart WSL) or use the generated `start-nanoclaw.sh` wrapper.
 
@@ -193,17 +190,17 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 
 ## 8. Verify
 
-Run `npx tsx setup/index.ts --step verify` and parse the status block.
+Run `bin/setup --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
-- SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
+- SERVICE=stopped → `make build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
-- MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
+- MOUNT_ALLOWLIST=missing → `bin/setup --step mounts -- --empty`
 
-Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
+Tell user to test: send a message in their registered chat. Show: `tail -f logs/stdout.log` (logs/stdout.log and logs/stderr.log are used by launchd)
 
 ## Troubleshooting
 

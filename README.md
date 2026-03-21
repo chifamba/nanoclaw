@@ -143,7 +143,8 @@ Skills we'd like to see:
 ## Requirements
 
 - macOS or Linux
-- Node.js 20+
+- Go 1.26+
+- Node.js 20+ (for the agent runner inside containers)
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
@@ -153,19 +154,19 @@ Skills we'd like to see:
 Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Go 1.26+ process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
 
 For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry (self-registration at startup)
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `cmd/nanoclaw/main.go` - Orchestrator entry point
+- `pkg/channel/registry.go` - Channel registry (self-registration at startup)
+- `pkg/ipc/watcher.go` - IPC watcher and task processing
+- `pkg/router/formatting.go` - Message formatting
+- `pkg/taskqueue/queue.go` - Per-group queue with global concurrency limit
+- `pkg/container/runner.go` - Spawns streaming agent containers
+- `pkg/scheduler/scheduler.go` - Runs scheduled tasks
+- `pkg/db/storage.go` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ

@@ -6,11 +6,10 @@
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{NODE_PATH}}</string>
-        <string>{{PROJECT_ROOT}}/dist/index.js</string>
+        <string>/Users/robert/projects/github.com/nanoclaw/bin/nanoclaw</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>{{PROJECT_ROOT}}</string>
+    <string>/Users/robert/projects/github.com/nanoclaw</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -18,15 +17,15 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/Users/robert/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
-        <string>{{HOME}}</string>
+        <string>/Users/robert</string>
         <key>ASSISTANT_NAME</key>
         <string>Andy</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
+    <string>/Users/robert/projects/github.com/nanoclaw/logs/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.error.log</string>
+    <string>/Users/robert/projects/github.com/nanoclaw/logs/stderr.log</string>
 </dict>
 </plist>

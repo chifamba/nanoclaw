@@ -4,20 +4,23 @@
 
 **Accepted:** Bug fixes, security fixes, simplifications, reducing code.
 
-**Not accepted:** Features, capabilities, compatibility, enhancements. These should be skills.
+**Not accepted:** Features, capabilities, compatibility, enhancements. These should be built into the core Go packages or added as skills if they involve external integrations.
 
-## Skills
+## Architecture
 
-A [skill](https://code.claude.com/docs/en/skills) is a markdown file in `.claude/skills/` that teaches Claude Code how to transform a NanoClaw installation.
+NanoClaw is written in Go 1.26+.
 
-A PR that contributes a skill should not modify any source files.
+- `cmd/nanoclaw/main.go`: Entry point and orchestration
+- `pkg/`: Core logic and channel implementations
+- `container/`: Agent runner (Node.js) that runs inside isolated containers
 
-Your skill should contain the **instructions** Claude follows to add the feature—not pre-built code. See `/add-telegram` for a good example.
+## Development
 
-### Why?
+1. Install Go 1.26+
+2. Clone the repository
+3. Run `make build` to build the orchestrator and setup tools
+4. Run `make test` to run all tests
 
-Every user should have clean and minimal code that does exactly what they need. Skills let users selectively add features to their fork without inheriting code for features they don't want.
+## Testing
 
-### Testing
-
-Test your skill by running it on a fresh clone before submitting.
+Always add tests for new logic in the corresponding `*_test.go` files. We aim for high coverage of core orchestration and routing logic.

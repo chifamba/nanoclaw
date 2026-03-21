@@ -3,6 +3,10 @@ node_modules/
 .npm-cache/
 # Build output
 dist/
+bin/
+/nanoclaw
+/setup
+/whatsapp-auth
 
 # Local data & auth
 store/
