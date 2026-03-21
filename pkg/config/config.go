@@ -51,6 +51,8 @@ var (
 	TriggerPattern *regexp.Regexp
 	// Timezone is the timezone used for scheduled tasks
 	Timezone string
+	// RedisURL is the URL of the Redis cache, if configured
+	RedisURL string
 )
 
 func init() {
@@ -70,6 +72,7 @@ func Load() {
 		"IDLE_TIMEOUT",
 		"MAX_CONCURRENT_CONTAINERS",
 		"TZ",
+		"REDIS_URL",
 	}
 
 	envConfig := env.ReadEnvFile(envKeys)
@@ -118,6 +121,8 @@ func Load() {
 		// we could try to read /etc/timezone or similar, but let's keep it simple for now.
 		Timezone = "UTC"
 	}
+
+	RedisURL = getEnv("REDIS_URL", envConfig, "")
 }
 
 func getEnv(key string, envConfig map[string]string, defaultValue string) string {

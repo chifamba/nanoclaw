@@ -27,16 +27,26 @@ type MessagePollerDelegate interface {
 type MessagePoller struct {
 	storage  db.Storage
 	queue    *taskqueue.GroupQueue
-	channels []channel.Channel
+	Channels []channel.Channel
 	delegate MessagePollerDelegate
+	trigger  chan struct{}
 }
 
 func NewMessagePoller(storage db.Storage, queue *taskqueue.GroupQueue, channels []channel.Channel, delegate MessagePollerDelegate) *MessagePoller {
 	return &MessagePoller{
 		storage:  storage,
 		queue:    queue,
-		channels: channels,
+		Channels: channels,
 		delegate: delegate,
+		trigger:  make(chan struct{}, 1),
+	}
+}
+
+// Trigger wakes up the poller immediately instead of waiting for the next tick
+func (p *MessagePoller) Trigger() {
+	select {
+	case p.trigger <- struct{}{}:
+	default:
 	}
 }
 
@@ -53,6 +63,10 @@ func (p *MessagePoller) Start(ctx context.Context) {
 		case <-ticker.C:
 			if err := p.poll(); err != nil {
 				logger.Error("Error in message loop", "err", err)
+			}
+		case <-p.trigger:
+			if err := p.poll(); err != nil {
+				logger.Error("Error in message loop (triggered)", "err", err)
 			}
 		}
 	}
@@ -140,7 +154,7 @@ func (p *MessagePoller) ProcessGroupMessages(chatJid string) (bool, error) {
 		return true, nil
 	}
 
-	ch := router.FindChannel(p.channels, chatJid)
+	ch := router.FindChannel(p.Channels, chatJid)
 	if ch == nil {
 		logger.Warn("No channel owns JID, skipping messages", "chatJid", chatJid)
 		return true, nil
